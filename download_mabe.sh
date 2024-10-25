@@ -15,4 +15,7 @@ wget "${base_url}/fly_group_train.npy" -O "data/mabe/fly_group_train.npy"
 wget "${base_url}/fly_group_test.npy" -O "data/mabe/fly_group_test.npy"
 wget "${base_url}/fly_groups_test_labels.npy" -O "data/mabe/fly_groups_test_labels.npy"
 
+# Script to download the robot dataset
+wget --no-check-certificate 'https://drive.google.com/uc?export=download&id=1q0a6etvda3XJ498lkDdfpbkz6zGqYXAs' -O data/isaac/robot_dataset.npy
+
 echo "Download complete."
