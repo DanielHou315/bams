@@ -6,6 +6,7 @@
 base_url="https://data.caltech.edu/records/8kdn3-95j37/files"
 
 mkdir -p data/mabe
+mkdir -p data/isaac
 
 # Download each file
 wget "${base_url}/mouse_triplet_train.npy" -O "data/mabe/mouse_triplet_train.npy"
