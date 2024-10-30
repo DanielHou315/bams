@@ -30,6 +30,7 @@ def load_data(path):
     action = data['dof_vel']
     print("-----Loaded", path)
     print(data.keys())
+    return np.concatenate((state, action), axis=-1)
 
 def train(model, device, loader, optimizer, criterion, writer, step, log_every_step):
     model.train()
