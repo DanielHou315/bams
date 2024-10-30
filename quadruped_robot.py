@@ -28,9 +28,10 @@ def load_data(path):
     # data is a dictionary that contains the behavior timeseries and labels
     state = data['dof_pos']
     action = data['dof_vel']
-    print("-----Loaded", path)
+    out = np.concatenate((state, action), axis=-1)
+    print("-----Loaded", path, "as", out.shape, "array")
     print(data.keys())
-    return np.concatenate((state, action), axis=-1)
+    return out
 
 def train(model, device, loader, optimizer, criterion, writer, step, log_every_step):
     model.train()
