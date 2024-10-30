@@ -22,9 +22,14 @@ def load_data(path):
     Load and format keypoint data. Output should be in the shape (n_samples, seq_len, num_feats). 
     Collapse xy coordinates into the single num_feats dimension.
     '''
-    keypoints = ...
-    return keypoints
-
+    data = np.load(path, allow_pickle=True).item()
+    # names contains the class names for each label
+    names = data.pop('names')
+    # data is a dictionary that contains the behavior timeseries and labels
+    state = data['dof_pos']
+    action = data['dof_vel']
+    print("-----Loaded", path)
+    print(data.keys())
 
 def train(model, device, loader, optimizer, criterion, writer, step, log_every_step):
     model.train()
