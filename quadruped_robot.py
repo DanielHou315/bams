@@ -28,7 +28,11 @@ def load_data(path):
     # data is a dictionary that contains the behavior timeseries and labels
     state = data['dof_pos']
     action = data['dof_vel']
-    out = np.concatenate((state, action), axis=-1)
+    # Their dataset comes in the wrong shape. Should be
+    # - (num_seq, num_timestamp, num_feature)
+    # Theirs came in 
+    # - (num_seq, num_feature, num_timestamp)
+    out = np.concatenate((state, action), axis=1).transpose(0,2,1)
     print("-----Loaded", path, "as", out.shape, "array")
     print(data.keys())
     return out
