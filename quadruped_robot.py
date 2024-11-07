@@ -19,27 +19,27 @@ from bams import HoALoss
 
 
 ## Copied from original training script
-def earth_mover_distance(y_true, y_pred):
-    return torch.mean(torch.square(torch.cumsum(y_true, dim=-1) - torch.cumsum(y_pred, dim=-1)), dim=-1)
+# def earth_mover_distance(y_true, y_pred):
+#     return torch.mean(torch.square(torch.cumsum(y_true, dim=-1) - torch.cumsum(y_pred, dim=-1)), dim=-1)
 
-class WassersteinLoss(nn.Module):
-    def __init__(self, skip_frames=60):
-        super().__init__()
-        # self.loss = SamplesLoss("sinkhorn", p=2, blur=0.1)
-        self.skip_frames = skip_frames
+# class WassersteinLoss(nn.Module):
+#     def __init__(self, skip_frames=60):
+#         super().__init__()
+#         # self.loss = SamplesLoss("sinkhorn", p=2, blur=0.1)
+#         self.skip_frames = skip_frames
 
-    def forward(self, target, pred):
-        weights = torch.ones(target.shape[:-1], dtype=torch.float, device=target.device)
-        weights[:, :self.skip_frames] = 0.
-        weights[:, -53:] = 0.
+#     def forward(self, target, pred):
+#         weights = torch.ones(target.shape[:-1], dtype=torch.float, device=target.device)
+#         weights[:, :self.skip_frames] = 0.
+#         weights[:, -53:] = 0.
 
-        target = target.reshape(-1, 32)
-        pred = pred.reshape(-1, 32)
-        weights = weights.flatten()
-        pred = torch.softmax(pred, dim=1)
-        loss = earth_mover_distance(target, pred)
-        loss = torch.mean(weights * loss)
-        return loss
+#         target = target.reshape(-1, 32)
+#         pred = pred.reshape(-1, 32)
+#         weights = weights.flatten()
+#         pred = torch.softmax(pred, dim=1)
+#         loss = earth_mover_distance(target, pred)
+#         loss = torch.mean(weights * loss)
+#         return loss
 
 
 
