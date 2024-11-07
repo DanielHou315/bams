@@ -1,8 +1,9 @@
 import os
+from tracemalloc import start
 import numpy as np
 import argparse
 from datetime import datetime
-
+import re
 
 import torch
 import torch.nn.functional as F
@@ -15,6 +16,31 @@ from tqdm import tqdm
 from bams.data import KeypointsDataset
 from bams.models import BAMS
 from bams import HoALoss
+
+
+## Copied from original training script
+def earth_mover_distance(y_true, y_pred):
+    return torch.mean(torch.square(torch.cumsum(y_true, dim=-1) - torch.cumsum(y_pred, dim=-1)), dim=-1)
+
+class WassersteinLoss(nn.Module):
+    def __init__(self, skip_frames=60):
+        super().__init__()
+        # self.loss = SamplesLoss("sinkhorn", p=2, blur=0.1)
+        self.skip_frames = skip_frames
+
+    def forward(self, target, pred):
+        weights = torch.ones(target.shape[:-1], dtype=torch.float, device=target.device)
+        weights[:, :self.skip_frames] = 0.
+        weights[:, -53:] = 0.
+
+        target = target.reshape(-1, 32)
+        pred = pred.reshape(-1, 32)
+        weights = weights.flatten()
+        pred = torch.softmax(pred, dim=1)
+        loss = earth_mover_distance(target, pred)
+        loss = torch.mean(weights * loss)
+        return loss
+
 
 
 def load_data(path):
@@ -116,8 +142,9 @@ def main():
     parser.add_argument("--num_workers", type=int, default=16)
     parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=4e-5)
+    parser.add_argument("--weight_decay", type=float, default=1e-5)
     parser.add_argument("--log_every_step", type=int, default=50)
+    parser.add_argument("--ckpt_file", type=str, default=None)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -143,18 +170,35 @@ def main():
     )
 
     # build model
+    # model = BAMS(
+    #     input_size=dataset.input_size,
+    #     short_term=dict(num_channels=(64, 64, 64, 64), kernel_size=3),
+    #     long_term=dict(num_channels=(64, 64, 64, 64, 64), kernel_size=3, dilation=4),
+    #     predictor=dict(
+    #         hidden_layers=(-1, 256, 512, 512, dataset.target_size * args.hoa_bins)
+    #     ),
+    # ).to(device)
+
+    # Replaced with original script models
     model = BAMS(
         input_size=dataset.input_size,
-        short_term=dict(num_channels=(64, 64, 64, 64), kernel_size=3),
-        long_term=dict(num_channels=(64, 64, 64, 64, 64), kernel_size=3, dilation=4),
-        predictor=dict(
-            hidden_layers=(-1, 256, 512, 512, dataset.target_size * args.hoa_bins)
-        ),
+        recent_past=dict(num_inputs=dataset.input_size, num_channels=(16, 16), kernel_size=2, num_layers_per_block=1),
+        short_term=dict(num_inputs=dataset.input_size, num_channels=(32, 32, 32), kernel_size=3, num_layers_per_block=2),
+        long_term=dict(num_inputs=dataset.input_size, num_channels=(32, 32, 32, 32, 32), kernel_size=3, dilation=4, num_layers_per_block=2),
+        predictor=dict(hidden_layers=(-1, 64, 128, dataset.target_size * args.hoa_bins)),
     ).to(device)
 
     print(model)
 
-    model_name = f"bams-custom-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    # Load Model
+    start_epoch = 1
+    if args.ckpt_file is not None:
+        model.load_state_dict(torch.load(args.ckpt_file, device))
+        m = re.match('ep[0-9]*?.pt', args.ckpt_file)
+        if m:
+            start_epoch = int(m[1])
+
+    model_name = f"quadruped-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
 
     writer = SummaryWriter("runs/" + model_name)
 
@@ -168,9 +212,10 @@ def main():
     )
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[200], gamma=0.1)
     criterion = HoALoss(hoa_bins=args.hoa_bins, skip_frames=100)
+    # criterion = WassersteinLoss(200)
 
     step = 0
-    for epoch in tqdm(range(1, args.epochs + 1), position=0):
+    for epoch in tqdm(range(start_epoch, args.epochs + 1), position=0):
         step = train(
             model,
             device,
@@ -183,8 +228,8 @@ def main():
         )
         scheduler.step()
 
-        if epoch % 100 == 0:
-            torch.save(model.state_dict(), model_name + ".pt")
+        if epoch % 10 == 0:
+            torch.save(model.state_dict(), "checkpoints/" + model_name + f"_ep{epoch}" + ".pt")
 
 
 if __name__ == "__main__":
