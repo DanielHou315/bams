@@ -195,14 +195,7 @@ def main():
     print(model)
     
     model_name = f"quadruped-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-
-    # Load Model
     start_epoch = 1
-    if args.ckpt_file is not None:
-        model_name, start_epoch, model, scheduler, optimizer = restore_checkpoint(args.ckpt_file, device, model, scheduler, optimizer)
-    
-
-    writer = SummaryWriter("runs/" + model_name)
 
     main_params = [p for name, p in model.named_parameters() if "byol" not in name]
     byol_params = list(model.byol_predictors.parameters())
@@ -216,8 +209,16 @@ def main():
     criterion = HoALoss(hoa_bins=args.hoa_bins, skip_frames=100)
     # criterion = WassersteinLoss(200)
 
-    step = 0
+    if args.ckpt_file is not None:
+        model_name, start_epoch, model, scheduler, optimizer = restore_checkpoint(args.ckpt_file, device, model, scheduler, optimizer)
+        print(f"Restored Model from epoch {start_epoch-1}")
+
+    writer = SummaryWriter("runs/" + model_name)
+    
+    step = 0 
     for epoch in tqdm(range(start_epoch, args.epochs + 1), position=0):
+        if epoch < start_epoch:
+            continue
         step = train(
             model,
             device,
