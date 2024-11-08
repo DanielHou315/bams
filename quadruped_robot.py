@@ -18,6 +18,8 @@ from bams.models import BAMS
 from bams import HoALoss
 
 
+from train_utils import save_checkpoint, restore_checkpoint
+
 ## Copied from original training script
 # def earth_mover_distance(y_true, y_pred):
 #     return torch.mean(torch.square(torch.cumsum(y_true, dim=-1) - torch.cumsum(y_pred, dim=-1)), dim=-1)
@@ -191,16 +193,14 @@ def main():
     ).to(device)
 
     print(model)
+    
+    model_name = f"quadruped-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
 
     # Load Model
     start_epoch = 1
     if args.ckpt_file is not None:
-        model.load_state_dict(torch.load(args.ckpt_file, device))
-        m = re.match('ep[0-9]*?.pt', args.ckpt_file)
-        if m:
-            start_epoch = int(m[1])
-
-    model_name = f"quadruped-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+        model_name, start_epoch, model, scheduler, optimizer = restore_checkpoint(args.ckpt_file, device, model, scheduler, optimizer)
+    
 
     writer = SummaryWriter("runs/" + model_name)
 
@@ -230,8 +230,8 @@ def main():
         )
         scheduler.step()
 
-        if epoch % 10 == 0:
-            torch.save(model.state_dict(), "checkpoints/" + model_name + f"_ep{epoch}" + ".pt")
+        if epoch % 10 == 0 or epoch == 1:
+            save_checkpoint(model_name, epoch, model, scheduler, optimizer)
 
 
 if __name__ == "__main__":
