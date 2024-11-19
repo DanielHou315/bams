@@ -2,6 +2,7 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+import argparse
 import seaborn as sn
 from sklearn.model_selection import train_test_split
 import torch
@@ -9,15 +10,37 @@ import torch.nn.functional as F
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
-import torch.nn as nn
 
-from bams.legged_robots import LeggedRobotsDataset
-from bams.models import BAMS, make_byol_predictor
+from bams.data import KeypointsDataset
+from bams.models import BAMS
 from bams import train_linear_classfier, train_linear_regressor
+
+from train_utils import save_checkpoint, restore_checkpoint
 
 import matplotlib
 matplotlib.use('Agg')
+
+
+
+def load_data(path):
+    '''
+    Load and format keypoint data. Output should be in the shape (n_samples, seq_len, num_feats). 
+    Collapse xy coordinates into the single num_feats dimension.
+    '''
+    data = np.load(path, allow_pickle=True).item()
+    # names contains the class names for each label
+    names = data.pop('names')
+    # data is a dictionary that contains the behavior timeseries and labels
+    state = data['dof_pos']
+    action = data['dof_vel']
+    # Their dataset comes in the wrong shape. Should be
+    # - (num_seq, num_timestamp, num_feature)
+    # Theirs came in 
+    # - (num_seq, num_feature, num_timestamp)
+    out = np.concatenate((state, action), axis=1).transpose(0,2,1)
+    print("-----Loaded", path, "as", out.shape, "array")
+    print(data.keys())
+    return out
 
 
 def test(model, device, dataset, train_idx, test_idx, writer, epoch):
@@ -96,7 +119,7 @@ def compute_representations(model, dataset, device, batch_size=64):
         x = data['input'].to(device)
 
         with torch.inference_mode():
-            pred, embs = model(x)
+            pred, embs, _ = model(x)
             for key, emb in embs.items():
                 embs_dict[key].append(emb.detach().cpu())
 
@@ -105,9 +128,30 @@ def compute_representations(model, dataset, device, batch_size=64):
 
 
 def main():
-    # load in checkpoint
-    dataset = #TODO
-    train_idx, test_idx = train_test_split(np.arrange(len(dataset)), test_size=0.8, random_state=42)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_root", type=str, default="./data/mabe")
+    parser.add_argument("--cache_path", type=str, default="./data/mabe/custom_dataset")
+    parser.add_argument("--hoa_bins", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=16)
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight_decay", type=float, default=1e-5)
+    parser.add_argument("--log_every_step", type=int, default=50)
+    parser.add_argument("--ckpt_file", type=str, default=None)
+    args = parser.parse_args()
+
+    keypoints = load_data(args.data_root)
+
+    dataset = KeypointsDataset(
+        keypoints=keypoints,
+        hoa_bins=args.hoa_bins,
+        cache_path=args.cache_path,
+        cache=False,
+    )
+    #print(dataset)
+    train_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.66, random_state=42)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = BAMS(
@@ -119,9 +163,12 @@ def main():
             hidden_layers=(-1, 64, 128, dataset.target_size * args.hoa_bins)
         ),
     ).to(device)
+
+    # restore model 
+    model_name, epoch, model, _, _ = restore_checkpoint('quadruped-2024-11-07-21-02-36_ep2000.pt', device, model)
     writer=SummaryWriter("runs/" + model_name)
 
-    test(model, device, dataset, train_idx, test_idx, writer)
+    test(model, device, dataset, train_idx, test_idx, writer, epoch)
     torch.save({'model': model}, 'bams.pt')
 if __name__ == "__main__":
     main()
