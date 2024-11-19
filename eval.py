@@ -102,3 +102,27 @@ def compute_representations(model, dataset, device, batch_size=64):
 
     embs = {key: torch.cat(emb_list) for key, emb_list in embs_dict.items()}
     return embs
+
+
+def main():
+    # load in checkpoint
+    dataset = #TODO
+    train_idx, test_idx = train_test_split(np.arrange(len(dataset)), test_size=0.8, random_state=42)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    model = BAMS(
+        input_size=dataset.input_size,
+        recent_past=dict(num_channels=(16, 16), kernel_size=2, num_layers_per_block=1),
+        short_term=dict(num_channels=(32, 32, 32), kernel_size=3, num_layers_per_block=2),
+        long_term=dict(num_channels=(32, 32, 32, 32, 32), kernel_size=3, dilation=4, num_layers_per_block=2),
+        predictor=dict(
+            hidden_laye
+            rs=(-1, 64, 128, dataset.target_size * args.hoa_bins)
+        ),
+    ).to(device)
+    writer=SummaryWriter("runs/" + model_name)
+
+    test(model, device, dataset, train_idx, test_idx, writer)
+    torch.save({'model': model}, 'bams.pt')
+if __name__ == "__main__":
+    main()
