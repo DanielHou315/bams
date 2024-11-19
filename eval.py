@@ -109,15 +109,14 @@ def main():
     dataset = #TODO
     train_idx, test_idx = train_test_split(np.arrange(len(dataset)), test_size=0.8, random_state=42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+
     model = BAMS(
         input_size=dataset.input_size,
         recent_past=dict(num_channels=(16, 16), kernel_size=2, num_layers_per_block=1),
         short_term=dict(num_channels=(32, 32, 32), kernel_size=3, num_layers_per_block=2),
         long_term=dict(num_channels=(32, 32, 32, 32, 32), kernel_size=3, dilation=4, num_layers_per_block=2),
         predictor=dict(
-            hidden_laye
-            rs=(-1, 64, 128, dataset.target_size * args.hoa_bins)
+            hidden_layers=(-1, 64, 128, dataset.target_size * args.hoa_bins)
         ),
     ).to(device)
     writer=SummaryWriter("runs/" + model_name)
