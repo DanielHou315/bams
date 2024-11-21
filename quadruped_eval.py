@@ -40,15 +40,16 @@ def load_data(path):
     out = np.concatenate((state, action), axis=1).transpose(0,2,1)
     print("-----Loaded", path, "as", out.shape, "array")
     print(data.keys())
-    return out
+    return out, list(data.keys())
 
 
-def test(model, device, dataset, train_idx, test_idx, writer, epoch):
+def test(model, device, dataset, data_keys, train_idx, test_idx, writer, epoch):
     # get embeddings
     embeddings = compute_representations(model, dataset, device)
 
-    # decode from all three embeddings
+    # decode from two embeddings
     def decode_class(keys, target, global_pool=False):
+        print(list(embeddings.keys()))
         if len(keys) == 1:
             emb = embeddings[keys[0]]
         else:
@@ -60,6 +61,7 @@ def test(model, device, dataset, train_idx, test_idx, writer, epoch):
 
         train_data = [emb[train_idx].transpose(1, 2).reshape(-1, emb_size), target[train_idx].reshape(-1)]
         test_data = [emb[test_idx].transpose(1, 2).reshape(-1, emb_size), target[test_idx].reshape(-1)]
+        print(train_data[0].size(), train_data[1].size())
         f1_score, cm = train_linear_classfier(target.max()+1, train_data, test_data, device, lr=1e-2, weight_decay=1e-4)
         return f1_score, cm
 
@@ -78,18 +80,21 @@ def test(model, device, dataset, train_idx, test_idx, writer, epoch):
         mse = train_linear_regressor(train_data, test_data, device, lr=1e-2, weight_decay=1e-4)
         return mse
 
-    for emb_keys in [['recent_past', 'short_term', 'long_term']]: # ['recent_past'], ['short_term'], ['long_term']]:
+    for emb_keys in [['recent_past'], ['short_term'], ['long_term']]: # ['recent_past'], ['short_term'], ['long_term']]:
         for target_tag in ['robot_type', 'terrain_type', 'terrain_type_2']:
-            target = torch.LongTensor(dataset.data[target_tag])
+            target_idx = data_keys.index(target_tag)
+            target = torch.LongTensor(dataset.input_feats[:,target_idx])
             if target_tag == 'robot_type':
-                class_names = dataset.names['robot_names']
+                # class_names = dataset.names['robot_names']
                 global_pool = True
             elif target_tag == 'terrain_type':
-                class_names = dataset.names['terrain_names']
+                # class_names = dataset.names['terrain_names']
                 global_pool = False
             else:
-                class_names = dataset.names['terrain_names_2']
+                # class_names = dataset.names['terrain_names_2']
                 global_pool = False
+            class_names = data_keys
+            print(emb_keys, target.size())
             f1_score, cm = decode_class(emb_keys, target, global_pool=global_pool)
 
             emb_tag = '_'.join(emb_keys)
@@ -110,17 +115,21 @@ def test(model, device, dataset, train_idx, test_idx, writer, epoch):
             writer.add_scalar(f'test/mse_{target_tag}_{emb_tag}', mse, epoch)
 
 
-def compute_representations(model, dataset, device, batch_size=64):
+def compute_representations(model, dataset, device, batch_size=32):
     model.eval()
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
+    print("Total of", len(loader), "batches")
+
     embs_dict = defaultdict(list)
-    for data in loader:
+    for i, data in enumerate(loader):
         x = data['input'].to(device)
 
         with torch.inference_mode():
-            pred, embs, _ = model(x)
+            # APIs for model forward() is different in the published version
+            embs, hoa_pred, byol_pred = model(x)
             for key, emb in embs.items():
+                print(key, emb.size())
                 embs_dict[key].append(emb.detach().cpu())
 
     embs = {key: torch.cat(emb_list) for key, emb_list in embs_dict.items()}
@@ -141,7 +150,7 @@ def main():
     parser.add_argument("--ckpt_file", type=str, default=None)
     args = parser.parse_args()
 
-    keypoints = load_data(args.data_root)
+    keypoints, data_keys = load_data(args.data_root)
 
     dataset = KeypointsDataset(
         keypoints=keypoints,
@@ -153,6 +162,7 @@ def main():
     train_idx, test_idx = train_test_split(np.arange(len(dataset)), test_size=0.66, random_state=42)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
 
     model = BAMS(
         input_size=dataset.input_size,
@@ -165,10 +175,11 @@ def main():
     ).to(device)
 
     # restore model 
-    model_name, epoch, model, _, _ = restore_checkpoint('quadruped-2024-11-07-21-02-36_ep2000.pt', device, model)
+    model_name, epoch, model, _, _ = restore_checkpoint(args.ckpt_file, device, model)
     writer=SummaryWriter("runs/" + model_name)
 
-    test(model, device, dataset, train_idx, test_idx, writer, epoch)
-    torch.save({'model': model}, 'bams.pt')
+    test(model, device, dataset, data_keys, train_idx, test_idx, writer, epoch)
+
+
 if __name__ == "__main__":
     main()
