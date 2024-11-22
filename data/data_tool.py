@@ -31,9 +31,10 @@ def inspect(file_path):
 def reduce_robot(d, num_sequences):
     reduced_dict = {}
     total_num_sequences = d["base_pos"].shape[0]
+    random_ids = np.random.randint(0, total_num_sequences-1, size=num_sequences)
     for key, val in d.items():
         if isinstance(val, np.ndarray) and val.shape[0] == total_num_sequences:
-            reduced_dict[key] = val[:num_sequences, ...]
+            reduced_dict[key] = val[random_ids, ...]
         else:
             reduced_dict[key] = val
     return reduced_dict
@@ -42,18 +43,24 @@ def reduce_mabe(d, num_sequences):
     # Reduce
     reduced_dict = {}
     total_num_sequences = len(d["sequences"])
+    ridx = 0
+
     for key, val in d.items():
-        if key == "sequences":
-            sequences = {}
-            num_add = 0
-            for k, v in val.items():
-                sequences[k] = v
-                num_add += 1
-                if num_add >= num_sequences:
-                    break
-            reduced_dict["sequences"] = sequences
-        else:
+        if not key == "sequences":
             reduced_dict[key] = val
+            continue
+
+    sequences = {}
+    random_ids = np.random.randint(0, total_num_sequences-1, size=num_sequences)
+    for i, (k, v) in enumerate(d["sequences"].items()):
+        if i != random_ids[ridx]: 
+            continue
+        sequences[k] = v
+        ridx += 1
+        if ridx == random_ids.shape[0]:
+            break
+
+    reduced_dict["sequences"] = sequences
     return reduced_dict
     
 
@@ -82,7 +89,7 @@ def reduce(file_path, num_sequences, type="mabe"):
 if __name__ == "__main__":
     DEFAULT_SEQ_NUM = 3
     if len(sys.argv) < 3:
-        print("Usage: python make_small.py <inspect/reduce-robot/reduce-mabe> <filename> [num_sequences (for reduce only)]")
+        print("Usage: python data_tool.py <inspect/reduce-robot/reduce-mabe> <filename> [num_sequences (for reduce only)]")
     else:
         action = sys.argv[1].lower()
         file_path = sys.argv[2]

@@ -102,5 +102,6 @@ external/
 *.npy
 
 checkpoints/
+cache/
 *.pkl
 *.pt

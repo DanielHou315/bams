@@ -1,9 +1,31 @@
 import numpy as np
 import torch
 from sklearn import metrics
-
+from tqdm import tqdm
 from sklearn.metrics import confusion_matrix
+from math import ceil
 
+class SimpleLoader:
+    def __init__(self, x, batch_size=64):
+        self.dlen = x.size(0)
+        self.bsize = batch_size
+        self.x = x
+        self.line = 0
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        return ceil(self.dlen / self.bsize)
+
+    def __next__(self):
+        if self.line >= self.dlen:
+            raise StopIteration()
+
+        term = min(self.dlen, self.line+self.bsize)
+        batch = self.x[self.line:term, ...]
+        self.line += self.bsize
+        return batch
 
 def train_linear_classfier(
     num_classes, train_data, test_data, device, lr=1e-2, weight_decay=1e-5
@@ -23,7 +45,8 @@ def train_linear_classfier(
 
         sample_weights = class_weights[label]
 
-        for step in range(1000):
+        print("-- Training Classifier")
+        for step in tqdm(range(1000)):
             # forward
             optimizer.zero_grad()
             pred_logits = classifier(x)
@@ -42,10 +65,17 @@ def train_linear_classfier(
         label = label.cpu().numpy().squeeze()
 
         # feed to network and classifier
+        print("-- Testing Classifier")
         with torch.no_grad():
-            pred_logits = classifier(x.to(device))
-            _, pred_class = torch.max(pred_logits, dim=1)
-            pred_class = pred_class.cpu().numpy()
+            preds = []
+            s = SimpleLoader(x, batch_size=4096)
+            for x_batch in tqdm(s):
+                pred_logits = classifier(x_batch.to(device))
+                _, pred_class = torch.max(pred_logits, dim=1)
+                pred_class = pred_class.cpu()
+                preds.append(pred_class)
+            del s, x
+            pred_class = torch.cat(preds, dim=0).numpy()
 
         f1_score = metrics.f1_score(label, pred_class, average="weighted")
         cm = confusion_matrix(label, pred_class, normalize="true")
@@ -86,7 +116,8 @@ def train_linear_regressor(train_data, test_data, device, lr=1e-4, weight_decay=
 
         x, label = x.to(device), label.to(device).squeeze()
 
-        for step in range(100):
+        print("-- Training Regressor")
+        for step in tqdm(range(100)):
             # forward
             optimizer.zero_grad()
             pred = regressor(x).squeeze()
@@ -98,12 +129,18 @@ def train_linear_regressor(train_data, test_data, device, lr=1e-4, weight_decay=
     def test(regressor, data):
         regressor.eval()
         x, label = data
-        x, label = x.to(device), label.to(device).squeeze()
 
         # feed to network and classifier
+        print("-- Testing Regressor")
         with torch.no_grad():
-            pred = regressor(x.to(device)).squeeze()
-            mse = torch.nn.functional.mse_loss(pred, label).cpu().numpy()
+            preds = []
+            s = SimpleLoader(x, batch_size=4096)
+            for x_batch in tqdm(s):
+                pred = regressor(x_batch.to(device)).squeeze()
+                preds.append(pred.cpu())
+            del s,x
+            pred = torch.cat(preds, dim=0).reshape(-1,1)
+            mse = torch.nn.functional.mse_loss(pred, label).numpy()
 
         return mse
 
