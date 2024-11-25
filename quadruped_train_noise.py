@@ -57,11 +57,12 @@ class LeggedRobotDataset(KeypointsDataset):
         # HOWEVER, for this script, we will stick to the original shapes 
         # as it works with their original script
         data = np.load(data_file, allow_pickle=True).item()
+        # Adds noise to input features
+        data = add_noise(data)
         # names contains the class names for each label
         self.names = data.pop('names')
         # Put everything else as self.data
         self.data = data
-        data = add_noise(data)
         # Make data for dataset
         input_feats = np.concatenate((data["dof_pos"], data["dof_vel"]), axis=1).transpose(0,2,1)
 
