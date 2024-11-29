@@ -1,9 +1,4 @@
 from collections import defaultdict
-import linecache
-import os
-import tracemalloc
-from sys import getsizeof
-import pickle
 
 import numpy as np
 import pandas as pd
@@ -52,34 +47,6 @@ class LeggedRobotDataset(KeypointsDataset):
         input_feats = np.concatenate((data["dof_pos"], data["dof_vel"]), axis=1).transpose(0,2,1)
 
         super().__init__(input_feats)
-
-def save_embedding(embs, root_path):
-    for key, val in embs.items():
-        with open(os.path.join(root_path, key+"_emb.pkl"), 'wb') as f:
-            pickle.dump(val, f)
-    print("Embedding saved")
-
-def load_embedding(keys, root_path):
-    vals = []
-    for key in keys:
-        file = os.path.join(root_path, key+"_emb.pkl")
-        if not os.path.isfile(file):
-            raise Exception(f"Embedding with key={key} not found!")
-        with open(os.path.join(root_path, key+"_emb.pkl"), 'rb') as f:
-            val = pickle.load(f)
-            vals.append(val)
-
-    if len(vals) == 1:
-        rtn = vals[0]
-    rtn = torch.cat(vals, dim=1)
-    print(f"Embedding loaded as {rtn.size()}")
-    return rtn
-
-def has_embedding_files(keys, root_path):
-    for key in keys:
-        if not os.path.exists(os.path.join(root_path, key+"_emb.pkl")):
-            return False
-    return True
 
 
 def test(model, device, dataset, train_idx, test_idx, writer, epoch):

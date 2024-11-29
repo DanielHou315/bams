@@ -105,3 +105,5 @@ checkpoints/
 cache/
 *.pkl
 *.pt
+
+quad_eval*
