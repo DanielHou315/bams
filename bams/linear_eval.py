@@ -45,7 +45,7 @@ def train_linear_classfier(
 
         sample_weights = class_weights[label]
 
-        print("-- Training Classifier")
+        # print("-- Training Classifier")
         for step in tqdm(range(1000)):
             # forward
             optimizer.zero_grad()
@@ -65,7 +65,7 @@ def train_linear_classfier(
         label = label.cpu().numpy().squeeze()
 
         # feed to network and classifier
-        print("-- Testing Classifier")
+        # print("-- Testing Classifier")
         with torch.no_grad():
             preds = []
             s = SimpleLoader(x, batch_size=4096)
@@ -116,7 +116,7 @@ def train_linear_regressor(train_data, test_data, device, lr=1e-4, weight_decay=
 
         x, label = x.to(device), label.to(device).squeeze()
 
-        print("-- Training Regressor")
+        # print("-- Training Regressor")
         for step in tqdm(range(100)):
             # forward
             optimizer.zero_grad()
@@ -131,7 +131,7 @@ def train_linear_regressor(train_data, test_data, device, lr=1e-4, weight_decay=
         x, label = data
 
         # feed to network and classifier
-        print("-- Testing Regressor")
+        # print("-- Testing Regressor")
         with torch.no_grad():
             preds = []
             s = SimpleLoader(x, batch_size=4096)

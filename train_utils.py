@@ -35,7 +35,7 @@ def save_embedding(embs, root_path):
     for key, val in embs.items():
         with open(os.path.join(root_path, key+"_emb.pkl"), 'wb') as f:
             pickle.dump(val, f)
-    print("Embedding saved")
+    # print("Embedding saved")
 
 def load_embedding(keys, root_path):
     vals = []
@@ -50,7 +50,7 @@ def load_embedding(keys, root_path):
     if len(vals) == 1:
         rtn = vals[0]
     rtn = torch.cat(vals, dim=1)
-    print(f"Embedding loaded as {rtn.size()}")
+    # print(f"Embedding loaded as {rtn.size()}")
     return rtn
 
 def has_embedding_files(keys, root_path):

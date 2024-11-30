@@ -287,6 +287,7 @@ def main():
     parser.add_argument("--log_every_step", type=int, default=50)
     parser.add_argument("--ckpt_file", type=str, default=None)
     parser.add_argument("--noise_scheme", type=str, default=None)
+    parser.add_argument("--noise_quant", type=int, default=1000)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
