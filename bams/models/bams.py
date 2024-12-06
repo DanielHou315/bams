@@ -3,7 +3,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 
-from bams.models import TemporalConvNet, MLP
+from bams.models import TemporalConvNet, MLP, SelfAttention
 
 
 class BAMS(nn.Module):
@@ -22,6 +22,7 @@ class BAMS(nn.Module):
         input_size,
         *,
         predictor=None,
+        attention = False,
         **encoder_kwargs,
     ):
         super().__init__()
@@ -36,6 +37,11 @@ class BAMS(nn.Module):
             self.representation_size += tcn_kwargs["num_channels"][-1]
 
         self.encoders = torch.nn.ModuleDict(encoders)
+
+        #input dimension = 131
+        if attention:
+            self.attention = SelfAttention(64, 64)
+            self.doing_attention = True
 
         # hoa predictor (first layer is a lazy linear layer)
         self.predictor = MLP(**predictor)
@@ -68,8 +74,15 @@ class BAMS(nn.Module):
 
         # concatenate input and embeddings
         hx = torch.cat([h, x], dim=2)
-        # prediction
-        hoa_pred = self.predictor(hx)
+
+        #attention and prediction
+        if self.doing_attention:
+            ha = self.attention(h)
+            # prediction with residual connection and layer normalization
+            embs['attention'] = ha
+            hoa_pred = self.predictor(torch.cat([embs['attention'], x], dim=2))
+        else:
+          hoa_pred = self.predictor(hx)
         return embs, hoa_pred, byol_preds
 
     def __repr__(self) -> str:

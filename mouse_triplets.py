@@ -2,11 +2,11 @@ import os
 import numpy as np
 import argparse
 from datetime import datetime
-
+import json
 
 import torch
 import torch.nn.functional as F
-from torch import optim
+from torch import StreamObjType, optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -59,6 +59,7 @@ def load_mice_triplet(path):
 # Process data #
 ################
 def mouse_feature_extractor(keypoints, noise_thresh=3e-3):
+    print("computing state features")
     # compute state features
     # body part 1: head, keypoints 0, 1, 2, 3
     head_center = keypoints[..., 3, :]
@@ -97,18 +98,21 @@ def mouse_feature_extractor(keypoints, noise_thresh=3e-3):
     )
     # rotate
     bottom = np.einsum("ijkp,lpij->ijkl", bottom, bottom_rotation)
-
     left_hindpaw_r, left_hindpaw_theta = to_polar_coordinates(bottom[..., 0, :])
     left_hindpaw_theta = left_hindpaw_theta
     right_hindpaw_r, right_hindpaw_theta = to_polar_coordinates(bottom[..., 1, :])
     right_hindpaw_theta = right_hindpaw_theta
     center_to_tail_r, _ = to_polar_coordinates(bottom[..., 2, :])
-
-    _, tail_theta_1 = to_polar_coordinates(bottom[..., 3, :] - bottom[..., 2, :])
+    tail_1 = bottom[..., 3, :] - bottom[..., 2, :]
+    print(tail_1.shape)
+    print(bottom[..., 2, :].shape)
+    _, tail_theta_1 = to_polar_coordinates(tail_1)
     tail_theta_1 = tail_theta_1
-    _, tail_theta_2 = to_polar_coordinates(bottom[..., 4, :] - bottom[..., 3, :])
+    tail_2 = bottom[..., 4, :] - bottom[..., 3, :]
+    _, tail_theta_2 = to_polar_coordinates(tail_2)
     tail_theta_2 = tail_theta_2
 
+    print("computing action features")
     # compute action features
     ### body part 1: head
     head_vx = diff(head_center[..., 0])
@@ -157,6 +161,7 @@ def mouse_feature_extractor(keypoints, noise_thresh=3e-3):
     ignore_frames = np.any(keypoints[..., 0] == 0, axis=-1)
     ignore_frames[:, 1:] = np.logical_or(ignore_frames[:, 1:], ignore_frames[:, :-1])
 
+    print("gathering input_features")
     input_features = np.stack(
         [
             head_center[..., 0],
@@ -229,7 +234,7 @@ def mouse_feature_extractor(keypoints, noise_thresh=3e-3):
         ],
         axis=-1,
     )
-
+    print("gathering target_feats")
     target_feats = np.stack(
         [
             head_vr,
@@ -333,6 +338,7 @@ def main():
         choices=["train", "compute_representations"],
         help="select task",
     )
+    parser.add_argument("--self_attention", type=bool, default=False)
     parser.add_argument("--data_root", type=str, default="./data/mabe")
     parser.add_argument("--cache_path", type=str, default="./data/mabe/mouse_triplet")
     parser.add_argument("--hoa_bins", type=int, default=32)
@@ -356,7 +362,7 @@ def train(args):
 
     # dataset
     if not Dataset.cache_is_available(args.cache_path, args.hoa_bins):
-        print("Processing data...")
+        print("====================Processing data...====================")
         keypoints, split_mask, batch = load_mice_triplet(args.data_root)
         input_feats, target_feats, ignore_frames = mouse_feature_extractor(keypoints)
     else:
@@ -385,6 +391,7 @@ def train(args):
         pin_memory=True,
     )
 
+    print("building model")
     # build model
     model = BAMS(
         input_size=dataset.input_size,
@@ -393,9 +400,18 @@ def train(args):
         predictor=dict(
             hidden_layers=(-1, 256, 512, 512, dataset.target_size * args.hoa_bins),
         ),  # frame rate = 30, 6 steps = 200ms
+        attention = args.self_attention
     ).to(device)
 
-    model_name = f"bams-mouse-triplet-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    if args.self_attention:
+      print("Attention model")
+
+    if args.ckpt_path is not None:
+        model.load_state_dict(torch.load(args.ckpt_path, map_location=device))
+        model.eval()
+
+    # model_name = f"bams-mouse-triplet-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
+    model_name = "bams-mouse-triplet-attn2"
 
     writer = SummaryWriter("runs/" + model_name)
 
@@ -410,6 +426,7 @@ def train(args):
     scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[200], gamma=0.1)
     criterion = HoALoss(hoa_bins=args.hoa_bins, skip_frames=60)
 
+    print("====================training====================")
     step = 0
     for epoch in tqdm(range(1, args.epochs + 1)):
         step = train_loop(
@@ -423,8 +440,8 @@ def train(args):
             args.log_every_step,
         )
         scheduler.step()
-
-        if epoch % 100 == 0:
+        print("finished epoch ", epoch)
+        if epoch % 50 == 0:
             torch.save(model.state_dict(), model_name + ".pt")
 
 
@@ -434,7 +451,8 @@ def compute_representations(args):
     keypoints, split_mask, batch = load_mice_triplet(args.data_root)
 
     # dataset
-    if not Dataset.cache_is_available(args.cache_path, args.hoa_bins):
+    # Should be not -- edited for debugging
+    if Dataset.cache_is_available(args.cache_path, args.hoa_bins):
         print("Processing data...")
         input_feats, target_feats, ignore_frames = mouse_feature_extractor(keypoints)
     else:
@@ -453,6 +471,8 @@ def compute_representations(args):
     )
 
     print("Number of sequences:", len(dataset))
+    mid_point = len(dataset) // 2
+    first_half, second_half = torch.utils.data.random_split(dataset, [mid_point, len(dataset) - mid_point])
 
     # build model
     model = BAMS(
@@ -462,6 +482,7 @@ def compute_representations(args):
         predictor=dict(
             hidden_layers=(-1, 256, 512, 512, dataset.target_size * args.hoa_bins),
         ),  # frame rate = 30, 6 steps = 200ms
+        attention = args.self_attention
     ).to(device)
 
     if args.ckpt_path is None:
@@ -471,31 +492,36 @@ def compute_representations(args):
     model.load_state_dict(torch.load(args.ckpt_path, map_location=device))
     model.eval()
 
-    loader = DataLoader(
-        dataset,
-        shuffle=False,
-        drop_last=False,
-        batch_size=32,
-        num_workers=16,
-        pin_memory=True,
-    )
+    def process_half(loader):
+      # compute representations
+      short_term_emb, long_term_emb, attention_emb = [], [], []
 
-    # compute representations
-    short_term_emb, long_term_emb = [], []
+      for data in loader:
+          input = data["input"].float().to(device)  # (B, N, L)
 
-    for data in loader:
-        input = data["input"].float().to(device)  # (B, N, L)
+          with torch.inference_mode():
+              embs, _, _ = model(input)
 
-        with torch.inference_mode():
-            embs, _, _ = model(input)
+              if args.self_attention:
+                attention_emb.append(embs['attention'].detach().cpu())
+              else:
+                short_term_emb.append(embs["short_term"].detach().cpu())
+                long_term_emb.append(embs["long_term"].detach().cpu())
 
-            short_term_emb.append(embs["short_term"].detach().cpu())
-            long_term_emb.append(embs["long_term"].detach().cpu())
+      if args.self_attention:
+        return torch.cat(attention_emb)
+      else:
+        short_term_emb = torch.cat(short_term_emb)
+        long_term_emb = torch.cat(long_term_emb)
+        return torch.cat([short_term_emb, long_term_emb], dim=2)
 
-    short_term_emb = torch.cat(short_term_emb)
-    long_term_emb = torch.cat(long_term_emb)
+    loader = DataLoader(first_half, batch_size=32, shuffle=False, num_workers=12, pin_memory=True)
+    embs1 = process_half(loader)
 
-    embs = torch.cat([short_term_emb, long_term_emb], dim=2)
+    loader = DataLoader(second_half, batch_size=32, shuffle=False, num_workers=12, pin_memory=True)
+    embs2 = process_half(loader)
+
+    embs = torch.cat([embs1, embs2])
 
     # the learned representations are at the individual mouse level, we want to compute
     # the mouse triplet-level representation
