@@ -3,7 +3,7 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 
-from bams.models import TemporalConvNet, MLP, SelfAttention
+from bams.models import TemporalConvNet, MLP, SelfAttentionStack
 
 
 class BAMS(nn.Module):
@@ -40,8 +40,10 @@ class BAMS(nn.Module):
 
         #input dimension = 131
         if attention:
-            self.attention = SelfAttention(64, 64)
+            self.attention = SelfAttentionStack(64, 256, 64, 4)
             self.doing_attention = True
+            # Trick existing BYOL constructor in making one for attention block
+            encoder_kwargs["attention"] = {'num_channels':[64, 256, 256, 64]}
 
         # hoa predictor (first layer is a lazy linear layer)
         self.predictor = MLP(**predictor)
@@ -70,19 +72,25 @@ class BAMS(nn.Module):
             byol_preds[name] = pred_emb.reshape(embs[name].shape)
 
         # concatenate embeddings
+        ht = torch.cat(list(embs.values()), dim=2)  # (B, L, N)
+        
+        # attention and prediction
+        if self.doing_attention:
+            name = 'attention'
+            # prediction with residual connection and layer normalization
+            embs[name] = self.attention(ht)
+            flattened_emb = embs[name].flatten(0, 1)  # (B*L, N)
+            pred_emb = self.byol_predictors[name](flattened_emb)
+            byol_preds[name] = pred_emb.reshape(embs[name].shape)
+
+        # concatenate embeddings
         h = torch.cat(list(embs.values()), dim=2)  # (B, L, N)
 
         # concatenate input and embeddings
         hx = torch.cat([h, x], dim=2)
 
-        #attention and prediction
-        if self.doing_attention:
-            ha = self.attention(h)
-            # prediction with residual connection and layer normalization
-            embs['attention'] = ha
-            hoa_pred = self.predictor(torch.cat([embs['attention'], x], dim=2))
-        else:
-          hoa_pred = self.predictor(hx)
+        # attention and prediction
+        hoa_pred = self.predictor(hx)
         return embs, hoa_pred, byol_preds
 
     def __repr__(self) -> str:

@@ -16,6 +16,8 @@ from bams.data.utils import diff, to_polar_coordinates, angle_clip
 from bams.models import BAMS
 from bams import HoALoss
 
+from train_utils import save_checkpoint, restore_checkpoint, save_embedding, load_embedding
+
 
 #############
 # Load data #
@@ -308,8 +310,28 @@ def train_loop(
             1 - F.cosine_similarity(view_1, view_2.clone().detach(), dim=-1).mean()
         )
 
+        # contrastive loss: self attention term
+        if "attention" in embs.keys():
+            batch_size, sequence_length, emb_dim = embs["attention"].size()
+            skip_frames = 100
+            view_1_id = (
+                torch.randint(sequence_length - skip_frames, (batch_size,)) + skip_frames
+            )
+            view_2_id = (
+                torch.randint(sequence_length - skip_frames, (batch_size,)) + skip_frames
+            )
+
+            view_1 = byol_preds["attention"][torch.arange(batch_size), view_1_id]
+            view_2 = embs["attention"][torch.arange(batch_size), view_2_id]
+
+            byol_loss_attn = (
+                1 - F.cosine_similarity(view_1, view_2.clone().detach(), dim=-1).mean()
+            )
+        else:
+            byol_loss_attn = torch.Tensor([0])
+
         # backprop
-        loss = 5e2 * hoa_loss + 0.5 * byol_loss_short_term + 0.5 * byol_loss_long_term
+        loss = 5e2 * hoa_loss + 0.5 * byol_loss_short_term + 0.5 * byol_loss_long_term + 0.5 * byol_loss_attn
 
         loss.backward()
         optimizer.step()
@@ -326,35 +348,6 @@ def train_loop(
             writer.add_scalar("train/total_loss", loss.item(), step)
 
     return step
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--job",
-        default="train",
-        const="train",
-        nargs="?",
-        choices=["train", "compute_representations"],
-        help="select task",
-    )
-    parser.add_argument("--self_attention", type=bool, default=False)
-    parser.add_argument("--data_root", type=str, default="./data/mabe")
-    parser.add_argument("--cache_path", type=str, default="./data/mabe/mouse_triplet")
-    parser.add_argument("--hoa_bins", type=int, default=32)
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--num_workers", type=int, default=16)
-    parser.add_argument("--epochs", type=int, default=500)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight_decay", type=float, default=4e-5)
-    parser.add_argument("--log_every_step", type=int, default=50)
-    parser.add_argument("--ckpt_path", type=str, default=None)
-    args = parser.parse_args()
-
-    if args.job == "train":
-        train(args)
-    elif args.job == "compute_representations":
-        compute_representations(args)
 
 
 def train(args):
@@ -403,15 +396,17 @@ def train(args):
         attention = args.self_attention
     ).to(device)
 
+    print(model)
+    print(list(model.byol_predictors.keys()))
+
     if args.self_attention:
-      print("Attention model")
+        print("Using Attention model")
 
-    if args.ckpt_path is not None:
-        model.load_state_dict(torch.load(args.ckpt_path, map_location=device))
-        model.eval()
+    if args.ckpt_file is not None:
+        model_name, start_epoch, model, scheduler, optimizer = restore_checkpoint(args.ckpt_file, device, model, scheduler, optimizer)
+        print(f"Restored Model from epoch {start_epoch-1}")
 
-    # model_name = f"bams-mouse-triplet-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
-    model_name = "bams-mouse-triplet-attn2"
+    model_name = f"bams-mouse-triplet-attn-{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}"
 
     writer = SummaryWriter("runs/" + model_name)
 
@@ -440,9 +435,9 @@ def train(args):
             args.log_every_step,
         )
         scheduler.step()
-        print("finished epoch ", epoch)
-        if epoch % 50 == 0:
-            torch.save(model.state_dict(), model_name + ".pt")
+        # Save every 10 iterations
+        if epoch % 10 == 0 or epoch == 1:
+            save_checkpoint(model_name, epoch, model, scheduler, optimizer)
 
 
 def compute_representations(args):
@@ -485,35 +480,36 @@ def compute_representations(args):
         attention = args.self_attention
     ).to(device)
 
-    if args.ckpt_path is None:
+    if args.ckpt_file is None:
         raise ValueError("Please specify a checkpoint path")
 
     # load checkpoint
-    model.load_state_dict(torch.load(args.ckpt_path, map_location=device))
+    # model.load_state_dict(torch.load(args.ckpt_file, map_location=device))
+    model_name, _, model, _, _ = restore_checkpoint(args.ckpt_file, device, model, scheduler, optimizer)
     model.eval()
 
     def process_half(loader):
-      # compute representations
-      short_term_emb, long_term_emb, attention_emb = [], [], []
+        # compute representations
+        short_term_emb, long_term_emb, attention_emb = [], [], []
 
-      for data in loader:
-          input = data["input"].float().to(device)  # (B, N, L)
+        for data in loader:
+            input = data["input"].float().to(device)  # (B, N, L)
 
-          with torch.inference_mode():
-              embs, _, _ = model(input)
+            with torch.inference_mode():
+                embs, _, _ = model(input)
 
-              if args.self_attention:
-                attention_emb.append(embs['attention'].detach().cpu())
-              else:
-                short_term_emb.append(embs["short_term"].detach().cpu())
-                long_term_emb.append(embs["long_term"].detach().cpu())
+                if args.self_attention:
+                    attention_emb.append(embs['attention'].detach().cpu())
+                else:
+                    short_term_emb.append(embs["short_term"].detach().cpu())
+                    long_term_emb.append(embs["long_term"].detach().cpu())
 
-      if args.self_attention:
-        return torch.cat(attention_emb)
-      else:
-        short_term_emb = torch.cat(short_term_emb)
-        long_term_emb = torch.cat(long_term_emb)
-        return torch.cat([short_term_emb, long_term_emb], dim=2)
+        if args.self_attention:
+            return torch.cat(attention_emb)
+        else:
+            short_term_emb = torch.cat(short_term_emb)
+            long_term_emb = torch.cat(long_term_emb)
+            return torch.cat([short_term_emb, long_term_emb], dim=2)
 
     loader = DataLoader(first_half, batch_size=32, shuffle=False, num_workers=12, pin_memory=True)
     embs1 = process_half(loader)
@@ -552,9 +548,38 @@ def compute_representations(args):
         embeddings=embs,
     )
 
-    model_name = os.path.splitext(os.path.basename(args.ckpt_path))[0]
-    np.save(f"{model_name}_submission.npy", submission_dict)
+    model_name = os.path.splitext(os.path.basename(args.ckpt_file))[0]
+    print(f"saving to {model_name}_submission_pickle4.npy...")
+    np.save(f"{model_name}_submission_pickle4.npy", submission_dict, allow_pickle=True, pickle_kwargs={"protocol": 4})
+    print("save complete")
 
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--job",
+        default="train",
+        const="train",
+        nargs="?",
+        choices=["train", "compute_representations"],
+        help="select task",
+    )
+    parser.add_argument("--self_attention", type=bool, default=False)
+    parser.add_argument("--data_root", type=str, default="./data/mabe")
+    parser.add_argument("--cache_path", type=str, default="./data/mabe/mouse_triplet")
+    parser.add_argument("--hoa_bins", type=int, default=32)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=16)
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--weight_decay", type=float, default=4e-5)
+    parser.add_argument("--log_every_step", type=int, default=50)
+    parser.add_argument("--ckpt_file", type=str, default=None)
+    args = parser.parse_args()
+
+    if args.job == "train":
+        train(args)
+    elif args.job == "compute_representations":
+        compute_representations(args)
 
 if __name__ == "__main__":
     main()
