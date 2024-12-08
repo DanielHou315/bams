@@ -3,6 +3,7 @@ import numpy as np
 import argparse
 from datetime import datetime
 import json
+import pickle
 
 import torch
 import torch.nn.functional as F
@@ -397,7 +398,6 @@ def train(args):
     ).to(device)
 
     print(model)
-    print(list(model.byol_predictors.keys()))
 
     if args.self_attention:
         print("Using Attention model")
@@ -442,7 +442,6 @@ def train(args):
 
 def compute_representations(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
     keypoints, split_mask, batch = load_mice_triplet(args.data_root)
 
     # dataset
@@ -485,7 +484,7 @@ def compute_representations(args):
 
     # load checkpoint
     # model.load_state_dict(torch.load(args.ckpt_file, map_location=device))
-    model_name, _, model, _, _ = restore_checkpoint(args.ckpt_file, device, model, scheduler, optimizer)
+    model_name, _, model, _, _ = restore_checkpoint(args.ckpt_file, device, model, None, None)
     model.eval()
 
     def process_half(loader):
@@ -549,9 +548,10 @@ def compute_representations(args):
     )
 
     model_name = os.path.splitext(os.path.basename(args.ckpt_file))[0]
-    print(f"saving to {model_name}_submission_pickle4.npy...")
-    np.save(f"{model_name}_submission_pickle4.npy", submission_dict, allow_pickle=True, pickle_kwargs={"protocol": 4})
-    print("save complete")
+    
+    fname = f"{model_name}_submission_pickle4.npy"
+    print(f"saving to {fname}")
+    np.save(fname, submission_dict, allow_pickle=True, pickle_kwargs={"protocol": 4})
 
 def main():
     parser = argparse.ArgumentParser()
